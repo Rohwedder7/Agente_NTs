@@ -1,13 +1,12 @@
-name: Agente NTs - Execução + E-mail
+name: Rodar agente (gerar resultado_nts.xlsx)
 
 on:
   schedule:
-    # Terça e Sexta às 12:00 UTC (ajuste se quiser outro horário)
-    - cron: "0 12 * * 2,5"
+    - cron: "0 12 * * 1,4"   # 09:00 BRT ~> 12:00 UTC (ajuste se quiser)
   workflow_dispatch:
 
 jobs:
-  run-and-notify:
+  run:
     runs-on: ubuntu-latest
 
     steps:
@@ -19,60 +18,47 @@ jobs:
         with:
           python-version: "3.12"
 
-      - name: Instalar dependências
-        run: |
-          python -m pip install --upgrade pip
-          if [ -f requirements.txt ]; then pip install -r requirements.txt; fi
+      - name: Cache pip
+        uses: actions/cache@v4
+        with:
+          path: ~/.cache/pip
+          key: ${{ runner.os }}-pip-${{ hashFiles('requirements.txt') }}
+          restore-keys: |
+            ${{ runner.os }}-pip-
 
-      - name: Rodar agente (gerar resultado_nts.xlsx)
-        id: agente
-        env:
-          PYTHONUNBUFFERED: "1"
+      - name: Upgrade pip
         run: |
-          python -m agente_nts.main || exit 1
-          echo "RESULT_FILE=output/resultado_nts.xlsx" >> $GITHUB_ENV
-          if [ -f "output/resultado_nts.xlsx" ]; then
-            echo "Arquivo de resultado gerado."
+          python -m pip install --upgrade pip setuptools wheel
+
+      - name: Instalar dependências (requirements.txt)
+        run: |
+          if [ -f requirements.txt ]; then
+            pip install -r requirements.txt
           else
-            echo "Arquivo de resultado NÃO encontrado."
+            echo "requirements.txt não encontrado; instalando pacotes essenciais de fallback"
+            pip install pypdf pdfplumber pandas openpyxl beautifulsoup4 lxml requests python-dateutil
           fi
 
-      - name: Publicar artifact (resultado_nts.xlsx) se existir
-        if: ${{ hashFiles('output/resultado_nts.xlsx') != '' }}
+      # PASSO CRÍTICO: verificação explícita de import
+      - name: Verificar instalação (pypdf e demais)
+        run: |
+          python -c "import sys;print(sys.version)"
+          python -c "import pypdf, pdfplumber, pandas, bs4, lxml, requests; print('OK imports:', pypdf.__version__)"
+          pip freeze
+
+      # Se você usa variáveis (.env) no GitHub, injete-as via secrets/vars
+      - name: Rodar agente (gerar resultado_nts.xlsx)
+        env:
+          ENABLE_EMAIL: "0"                   # desativa e-mail no CI (ajuste se usa Gmail)
+          # Outras variáveis do seu projeto, se existirem:
+          # SMTP_HOST: ${{ vars.SMTP_HOST }}
+          # ...
+        run: |
+          python -m agente_nts.main || exit 1
+
+      - name: Persistir saída (resultado_nts.xlsx)
         uses: actions/upload-artifact@v4
         with:
           name: resultado_nts
           path: output/resultado_nts.xlsx
-          retention-days: 14
-
-      - name: Enviar e-mail de notificação
-        if: always()   # manda mesmo se der falha; troque para success() se quiser só em sucesso
-        uses: dawidd6/action-send-mail@v3
-        with:
-          server_address: ${{ secrets.MAIL_SERVER }}
-          server_port: ${{ secrets.MAIL_PORT }}
-          username: ${{ secrets.MAIL_USERNAME }}
-          password: ${{ secrets.MAIL_PASSWORD }}
-          subject: "Agente NTs: execução em ${{ github.repository }} (#${{ github.run_number }})"
-          to: ${{ secrets.MAIL_TO }}
-          from: ${{ secrets.MAIL_FROM }}
-          secure: true
-          convert_markdown: true
-          # Se quiser anexar o arquivo quando existir:
-          attachments: |
-            output/resultado_nts.xlsx
-          body: |
-            ## ✅ Agente NTs executado
-
-            - **Repositório:** ${{ github.repository }}
-            - **Branch:** `${{ github.ref_name }}`
-            - **Run ID:** ${{ github.run_id }}
-            - **Status do job:** ${{ job.status }}
-            - **Data (UTC):** ${{ steps.agente.outputs.time || '' }}
-
-            **Página do run:** https://github.com/${{ github.repository }}/actions/runs/${{ github.run_id }}
-
-            ${{
-              hashFiles('output/resultado_nts.xlsx') != '' &&
-              'O arquivo *output/resultado_nts.xlsx* foi gerado e está anexado nesta mensagem (se o provedor permitir anexos). Também fica disponível em **Artifacts** na página do run.'
-            }}
+          if-no-files-found: warn
