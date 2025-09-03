@@ -1,0 +1,7 @@
+# Configuração do Agente de NTs
+sources:
+  - "https://www.nfe.fazenda.gov.br/portal/listaConteudo.aspx?tipoConteudo=04BIflQt1aY="
+include_keywords: ["Nota Técnica", "NT", "NFe", "NF-e"]
+exclude_keywords: []
+rule_exclude_keywords: ["risco"]
+output_excel: "resultado_nts.xlsx"
